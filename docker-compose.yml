@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  telegram-voice-transcriber:
+    image: belgradebc/telegram-voice-transcriber:latest
+    container_name: voice-transcriber
+    restart: always
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+      - ./google-credentials.json:/app/google-credentials.json

@@ -249,7 +249,8 @@ init_db()
 # Initialize AssemblyAI transcriber with Serbian language configuration
 transcriber = aai.Transcriber(
     config=aai.TranscriptionConfig(
-        language_code="sr"  # Serbian language code
+        language_code="sr",  # Serbian language code
+        speech_model=aai.SpeechModel.best
     )
 )
 logger.info("AssemblyAI transcriber initialized successfully")

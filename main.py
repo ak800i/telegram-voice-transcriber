@@ -5,9 +5,9 @@ import tempfile
 import sqlite3
 import datetime
 from dotenv import load_dotenv
+import assemblyai as aai
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-from google.cloud import speech
 from pydub import AudioSegment
 import ffmpeg
 
@@ -24,7 +24,13 @@ load_dotenv()
 
 # Get environment variables
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+ASSEMBLYAI_API_KEY = os.getenv('ASSEMBLYAI_API_KEY')
+
 logger.info(f"Loaded TELEGRAM_TOKEN: {TELEGRAM_TOKEN[:4]}...{TELEGRAM_TOKEN[-4:] if TELEGRAM_TOKEN else 'None'}")
+logger.info(f"Loaded ASSEMBLYAI_API_KEY: {ASSEMBLYAI_API_KEY[:4]}...{ASSEMBLYAI_API_KEY[-4:] if ASSEMBLYAI_API_KEY else 'None'}")
+
+# Configure AssemblyAI
+aai.settings.api_key = ASSEMBLYAI_API_KEY
 
 # Constants
 MAX_AUDIO_MINUTES = 50  # Maximum allowed audio processing time in minutes (global limit)
@@ -233,17 +239,21 @@ if not TELEGRAM_TOKEN:
     logger.error("TELEGRAM_TOKEN not found in environment variables.")
     raise ValueError("TELEGRAM_TOKEN not found in environment variables.")
 
+if not ASSEMBLYAI_API_KEY:
+    logger.error("ASSEMBLYAI_API_KEY not found in environment variables.")
+    raise ValueError("ASSEMBLYAI_API_KEY not found in environment variables.")
+
 # Initialize the database
 init_db()
 
-# Initialize Google Cloud Speech client
-try:
-    logger.info("Initializing Google Cloud Speech client")
-    speech_client = speech.SpeechClient()
-    logger.info("Google Cloud Speech client initialized successfully")
-except Exception as e:
-    logger.error(f"Error initializing Google Cloud Speech client: {e}")
-    raise
+# Initialize AssemblyAI transcriber with Serbian language configuration
+transcriber = aai.Transcriber(
+    config=aai.TranscriptionConfig(
+        language_code="sr",  # Serbian language code
+        speech_model=aai.SpeechModel.best
+    )
+)
+logger.info("AssemblyAI transcriber initialized successfully")
 
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
@@ -304,48 +314,32 @@ def global_stats_command(update: Update, context: CallbackContext) -> None:
     update.message.reply_text(message, parse_mode='Markdown')
 
 def transcribe_audio(file_path):
-    """Transcribe the given audio file using Google Speech-to-Text API."""
+    """Transcribe the given audio file using AssemblyAI."""
     try:
-        # Convert the audio file to the correct format (WAV, mono, 16kHz, 16-bit)
-        temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
-        logger.info(f"Converting audio file to proper format: {file_path} -> {temp_wav}")
+        # Convert the audio file to the correct format (MP3)
+        temp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
+        logger.info(f"Converting audio file to proper format: {file_path} -> {temp_mp3}")
         
         audio = AudioSegment.from_file(file_path)
-        audio = audio.set_channels(1)  # Convert to mono
-        audio = audio.set_frame_rate(16000)  # Convert to 16kHz
-        audio = audio.set_sample_width(2)  # Convert to 16-bit (2 bytes per sample)
+        audio_length_sec = len(audio) / 1000  # Get audio length in seconds
         
-        logger.info(f"Audio properties after conversion: channels={audio.channels}, frame_rate={audio.frame_rate}, sample_width={audio.sample_width}")
-        audio.export(temp_wav, format="wav")
+        # Export as MP3 for AssemblyAI
+        audio.export(temp_mp3, format="mp3")
         
-        # Read the audio file
-        with open(temp_wav, "rb") as audio_file:
-            content = audio_file.read()
+        # Send to AssemblyAI for transcription
+        logger.info("Sending audio to AssemblyAI")
+        transcript = transcriber.transcribe(temp_mp3)
         
-        # Configure the audio to be recognized
-        audio_for_speech = speech.RecognitionAudio(content=content)
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000,
-            language_code="sr-RS",  # Serbian language code
-            model="default",
-            enable_automatic_punctuation=True,
-        )
-        
-        # Detect speech in the audio file
-        logger.info("Sending audio to Google Speech-to-Text API")
-        response = speech_client.recognize(config=config, audio=audio_for_speech)
-        
-        transcript = ""
-        for result in response.results:
-            transcript += result.alternatives[0].transcript
+        if transcript.status == "error":
+            logger.error(f"Transcription error: {transcript.error}")
+            return audio_length_sec, f"Transcription error: {transcript.error}"
         
         # Clean up temporary files
-        os.unlink(temp_wav)
+        os.unlink(temp_mp3)
         os.unlink(file_path)
         
         # Return audio length in seconds and the transcript
-        return len(audio) / 1000, transcript  # Length in seconds
+        return audio_length_sec, transcript.text
     except Exception as e:
         logger.error(f"Error during transcription: {e}")
         return 0, f"Transcription error: {str(e)}"

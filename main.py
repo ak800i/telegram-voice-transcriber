@@ -6,7 +6,7 @@ import sqlite3
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-from azure.cognitiveservices.speech import SpeechConfig, SpeechRecognizer, AudioConfig, SpeechRecognitionResult, ResultReason
+from google.cloud import speech
 from pydub import AudioSegment
 
 # Configure logging with more detailed format
@@ -234,17 +234,13 @@ if not TELEGRAM_TOKEN:
 # Initialize the database
 init_db()
 
-# Initialize Azure Speech Service client
+# Initialize Google Cloud Speech client
 try:
-    logger.info("Initializing Azure Speech Service client")
-    azure_speech_config = SpeechConfig(
-        subscription=os.getenv('AZURE_SPEECH_KEY'),
-        region=os.getenv('AZURE_SPEECH_REGION')
-    )
-    azure_speech_config.speech_recognition_language = "sr-RS"  # Serbian language code
-    logger.info("Azure Speech Service client initialized successfully")
+    logger.info("Initializing Google Cloud Speech client")
+    speech_client = speech.SpeechClient()
+    logger.info("Google Cloud Speech client initialized successfully")
 except Exception as e:
-    logger.error(f"Error initializing Azure Speech Service client: {e}")
+    logger.error(f"Error initializing Google Cloud Speech client: {e}")
     raise
 
 def start(update: Update, context: CallbackContext) -> None:
@@ -306,41 +302,46 @@ def global_stats_command(update: Update, context: CallbackContext) -> None:
     update.message.reply_text(message, parse_mode='Markdown')
 
 def transcribe_audio(file_path):
-    """Transcribe the given audio file using Azure Speech-to-Text API."""
+    """Transcribe the given audio file using Google Speech-to-Text API."""
     try:
         # Convert the audio file to the correct format (WAV, mono, 16kHz, 16-bit)
         temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
         logger.info(f"Converting audio file to proper format: {file_path} -> {temp_wav}")
-
+        
         audio = AudioSegment.from_file(file_path)
         audio = audio.set_channels(1)  # Convert to mono
         audio = audio.set_frame_rate(16000)  # Convert to 16kHz
         audio = audio.set_sample_width(2)  # Convert to 16-bit (2 bytes per sample)
-
+        
         logger.info(f"Audio properties after conversion: channels={audio.channels}, frame_rate={audio.frame_rate}, sample_width={audio.sample_width}")
         audio.export(temp_wav, format="wav")
-
-        # Configure Azure audio input
-        audio_input = AudioConfig(filename=temp_wav)
-        recognizer = SpeechRecognizer(speech_config=azure_speech_config, audio_config=audio_input)
-
-        # Perform recognition
-        logger.info("Sending audio to Azure Speech-to-Text API")
-        result = recognizer.recognize_once()
-
-        # Check the result
-        if result.reason == ResultReason.RecognizedSpeech:
-            transcript = result.text
-        elif result.reason == ResultReason.NoMatch:
-            transcript = "No speech could be recognized."
-        elif result.reason == ResultReason.Canceled:
-            cancellation_details = result.cancellation_details
-            transcript = f"Recognition canceled: {cancellation_details.reason}. Error details: {cancellation_details.error_details}"
-
+        
+        # Read the audio file
+        with open(temp_wav, "rb") as audio_file:
+            content = audio_file.read()
+        
+        # Configure the audio to be recognized
+        audio_for_speech = speech.RecognitionAudio(content=content)
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=16000,
+            language_code="sr-RS",  # Serbian language code
+            model="default",
+            enable_automatic_punctuation=True,
+        )
+        
+        # Detect speech in the audio file
+        logger.info("Sending audio to Google Speech-to-Text API")
+        response = speech_client.recognize(config=config, audio=audio_for_speech)
+        
+        transcript = ""
+        for result in response.results:
+            transcript += result.alternatives[0].transcript
+        
         # Clean up temporary files
         os.unlink(temp_wav)
         os.unlink(file_path)
-
+        
         # Return audio length in seconds and the transcript
         return len(audio) / 1000, transcript  # Length in seconds
     except Exception as e:

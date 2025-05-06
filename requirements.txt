@@ -1,5 +1,5 @@
 python-telegram-bot==13.15
-google-cloud-speech==2.20.0
+elevenlabs==1.57.0
 pydub==0.25.1
 python-dotenv==1.0.0
 requests==2.31.0

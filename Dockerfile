@@ -21,7 +21,7 @@ COPY . .
 ENV PYTHONUNBUFFERED=1
 
 # Add a script to verify environment variables at runtime
-RUN echo '#!/bin/bash\necho "Container environment:"\nls -la .\necho "Environment variables:"\nenv | grep -E "TOKEN|CREDENTIALS"\necho "Content of .env file:"\nif [ -f .env ]; then cat .env; else echo ".env file not found"; fi\necho "Starting bot..."\nexec "$@"' > /entrypoint.sh \
+RUN echo '#!/bin/bash\necho "Container environment:"\nls -la .\necho "Environment variables:"\nenv | grep -E "TOKEN|API_KEY"\necho "Content of .env file:"\nif [ -f .env ]; then cat .env; else echo ".env file not found"; fi\necho "Starting bot..."\nexec "$@"' > /entrypoint.sh \
     && chmod +x /entrypoint.sh
 
 # Use the entrypoint script

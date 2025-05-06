@@ -6,5 +6,6 @@ services:
     container_name: voice-transcriber
     restart: always
     volumes:
-      - /volume2/docker-data/telegram-voice-transcriber/data:/app/data
-      - /volume2/docker-data/telegram-voice-transcriber/.env:/app/.env
+      - ./data:/app/data
+      - ./.env:/app/.env
+      - ./google-credentials.json:/app/google-credentials.json

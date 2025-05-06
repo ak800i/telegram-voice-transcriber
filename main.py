@@ -3,10 +3,10 @@ import os
 import logging
 import tempfile
 import sqlite3
-import requests
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from google.cloud import speech
 from pydub import AudioSegment
 
 # Configure logging with more detailed format
@@ -22,14 +22,11 @@ load_dotenv()
 
 # Get environment variables
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
 logger.info(f"Loaded TELEGRAM_TOKEN: {TELEGRAM_TOKEN[:4]}...{TELEGRAM_TOKEN[-4:] if TELEGRAM_TOKEN else 'None'}")
-logger.info(f"Loaded ELEVENLABS_API_KEY: {ELEVENLABS_API_KEY[:4]}...{ELEVENLABS_API_KEY[-4:] if ELEVENLABS_API_KEY else 'None'}")
 
 # Constants
 MAX_AUDIO_MINUTES = 50  # Maximum allowed audio processing time in minutes (global limit)
 DB_PATH = os.getenv('DB_PATH', 'data/stats.db')  # Database file path, can be overridden by env var
-ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 
 # Create data directory if it doesn't exist
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -234,12 +231,17 @@ if not TELEGRAM_TOKEN:
     logger.error("TELEGRAM_TOKEN not found in environment variables.")
     raise ValueError("TELEGRAM_TOKEN not found in environment variables.")
 
-if not ELEVENLABS_API_KEY:
-    logger.error("ELEVENLABS_API_KEY not found in environment variables.")
-    raise ValueError("ELEVENLABS_API_KEY not found in environment variables.")
-
 # Initialize the database
 init_db()
+
+# Initialize Google Cloud Speech client
+try:
+    logger.info("Initializing Google Cloud Speech client")
+    speech_client = speech.SpeechClient()
+    logger.info("Google Cloud Speech client initialized successfully")
+except Exception as e:
+    logger.error(f"Error initializing Google Cloud Speech client: {e}")
+    raise
 
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
@@ -300,57 +302,48 @@ def global_stats_command(update: Update, context: CallbackContext) -> None:
     update.message.reply_text(message, parse_mode='Markdown')
 
 def transcribe_audio(file_path):
-    """Transcribe the given audio file using ElevenLabs Speech-to-Text API."""
+    """Transcribe the given audio file using Google Speech-to-Text API."""
     try:
-        # Convert the audio file to the correct format (MP3)
-        temp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
-        logger.info(f"Converting audio file to proper format: {file_path} -> {temp_mp3}")
+        # Convert the audio file to the correct format (WAV, mono, 16kHz, 16-bit)
+        temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
+        logger.info(f"Converting audio file to proper format: {file_path} -> {temp_wav}")
         
         audio = AudioSegment.from_file(file_path)
-        audio_length_sec = len(audio) / 1000  # Get audio length in seconds
+        audio = audio.set_channels(1)  # Convert to mono
+        audio = audio.set_frame_rate(16000)  # Convert to 16kHz
+        audio = audio.set_sample_width(2)  # Convert to 16-bit (2 bytes per sample)
         
-        # Export as MP3 for ElevenLabs
-        audio.export(temp_mp3, format="mp3")
+        logger.info(f"Audio properties after conversion: channels={audio.channels}, frame_rate={audio.frame_rate}, sample_width={audio.sample_width}")
+        audio.export(temp_wav, format="wav")
         
-        # Prepare the request to ElevenLabs API
-        headers = {
-            "xi-api-key": ELEVENLABS_API_KEY,
-            "Accept": "application/json"
-        }
+        # Read the audio file
+        with open(temp_wav, "rb") as audio_file:
+            content = audio_file.read()
         
-        # Set up the multipart form data with model_id in the form, not as query param
-        with open(temp_mp3, 'rb') as f:
-            files = {
-                'file': ('audio.mp3', f, 'audio/mpeg'),
-                'model_id': (None, 'scribe_v1'),  # Send model_id as form field
-            }
-            
-            if 'sr' in ['sr']:  # Allow option to disable language code in the future
-                files['language_code'] = (None, 'sr')  # Optional: Serbian language code
-            
-            # Send the request
-            logger.info("Sending audio to ElevenLabs API")
-            response = requests.post(
-                ELEVENLABS_API_URL,
-                headers=headers,
-                files=files  # All parameters including model_id are now in the form data
-            )
+        # Configure the audio to be recognized
+        audio_for_speech = speech.RecognitionAudio(content=content)
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=16000,
+            language_code="sr-RS",  # Serbian language code
+            model="default",
+            enable_automatic_punctuation=True,
+        )
         
-        # Check for successful response
-        if response.status_code == 200:
-            result = response.json()
-            transcript = result.get('text', '')
-            logger.info(f"Transcription successful: {transcript[:50]}...")
-        else:
-            logger.error(f"ElevenLabs API error: {response.status_code} - {response.text}")
-            return audio_length_sec, f"Transcription error: API returned status code {response.status_code}"
+        # Detect speech in the audio file
+        logger.info("Sending audio to Google Speech-to-Text API")
+        response = speech_client.recognize(config=config, audio=audio_for_speech)
+        
+        transcript = ""
+        for result in response.results:
+            transcript += result.alternatives[0].transcript
         
         # Clean up temporary files
-        os.unlink(temp_mp3)
+        os.unlink(temp_wav)
         os.unlink(file_path)
         
         # Return audio length in seconds and the transcript
-        return audio_length_sec, transcript
+        return len(audio) / 1000, transcript  # Length in seconds
     except Exception as e:
         logger.error(f"Error during transcription: {e}")
         return 0, f"Transcription error: {str(e)}"

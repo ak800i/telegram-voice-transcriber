@@ -3,13 +3,11 @@ import os
 import logging
 import tempfile
 import sqlite3
-import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from google.cloud import speech
 from pydub import AudioSegment
-import ffmpeg
 
 # Configure logging with more detailed format
 logging.basicConfig(

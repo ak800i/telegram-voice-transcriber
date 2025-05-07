@@ -10,16 +10,21 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 from google.cloud import speech
 from pydub import AudioSegment
 
+# Load environment variables from .env file first
+load_dotenv()
+
 # Configure logging with more detailed format
+# Get log level from environment variable, default to DEBUG if not specified
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'DEBUG')
+numeric_level = getattr(logging, LOG_LEVEL.upper(), logging.DEBUG)
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG  # Changed from INFO to DEBUG for more detailed logs
+    level=numeric_level
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables from .env file
-logger.info("Loading environment variables from .env file")
-load_dotenv()
+logger.info(f"Logging level set to: {LOG_LEVEL}")
 
 # Get environment variables
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')

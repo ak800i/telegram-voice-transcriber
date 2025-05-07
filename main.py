@@ -196,37 +196,30 @@ def get_user_stats(user_id):
         return {'total_audio_min': 0, 'last_updated': None}
 
 # Debug environment
-logger.info("Environment variables:")
-for key, value in os.environ.items():
-    if 'TOKEN' in key or 'KEY' in key or 'SECRET' in key:
-        # Mask sensitive values
-        logger.info(f"  {key}: {value[:4]}...{value[-4:]}")
-    else:
-        logger.info(f"  {key}: {value}")
+def log_sensitive_info(value):
+    """Mask sensitive values for logging."""
+    if not value or len(value) < 8:
+        return "****"
+    return f"{value[:4]}...{value[-4:]}"
 
-# Check if .env file exists and readable
+# Log key environment variables and config
+logger.info("Configuration summary:")
+# Log the existence of .env file
 env_path = os.path.join(os.getcwd(), '.env')
-logger.info(f"Checking .env file at {env_path}")
-if os.path.exists(env_path):
-    logger.info(f".env file exists at {env_path}")
-    try:
-        with open(env_path, 'r') as f:
-            env_content = f.read()
-            # Log first few chars of each line to avoid exposing tokens
-            logger.info("Contents of .env file (partially masked):")
-            for line in env_content.splitlines():
-                if line.strip() and not line.strip().startswith('#'):
-                    key_val = line.split('=', 1)
-                    if len(key_val) == 2:
-                        key, val = key_val
-                        if 'TOKEN' in key or 'KEY' in key or 'SECRET' in key:
-                            logger.info(f"  {key}={val[:4]}...{val[-4:]}")
-                        else:
-                            logger.info(f"  {key}={val}")
-    except Exception as e:
-        logger.error(f"Error reading .env file: {e}")
-else:
-    logger.error(f".env file does not exist at {env_path}")
+env_exists = os.path.exists(env_path)
+logger.info(f".env file: {'Present' if env_exists else 'Not found'} at {env_path}")
+
+# Log critical environment variables with masking
+critical_vars = {
+    "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
+    "GOOGLE_APPLICATION_CREDENTIALS": os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+}
+
+for key, value in critical_vars.items():
+    if value:
+        logger.info(f"  {key}: {log_sensitive_info(value) if 'TOKEN' in key or 'KEY' in key or 'SECRET' in key else value}")
+    else:
+        logger.error(f"  {key}: Missing")
 
 if not TELEGRAM_TOKEN:
     logger.error("TELEGRAM_TOKEN not found in environment variables.")

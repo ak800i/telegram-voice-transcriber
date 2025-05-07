@@ -12,7 +12,7 @@ echo Creating data directory if it doesn't exist...
 if not exist "%cd%\data" mkdir "%cd%\data"
 
 echo Starting container...
-docker run -d --name voice-transcriber --restart unless-stopped ^
+docker run -d --name voice-transcriber --restart no ^
   -v "%cd%\.env:/app/.env" ^
   -v "%cd%\google-credentials.json:/app/google-credentials.json" ^
   -v "%cd%\data:/app/data" ^

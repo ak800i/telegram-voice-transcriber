@@ -415,8 +415,6 @@ async def main() -> None:
 
 if __name__ == '__main__':
     # Extremely simplified approach for Docker environments
-    from telegram.ext import ApplicationBuilder
-    
     logger.info("Starting bot using non-asyncio entry point")
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     

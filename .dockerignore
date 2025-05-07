@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Environment files
+.env.*
+.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Google Cloud credentials
+*.json
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+publish.bat
+start.bat
+start.sh
+
+# Documentation
+README.md
+LICENSE
+
+# VS Code
+.vscode/

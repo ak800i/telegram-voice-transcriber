@@ -48,8 +48,5 @@ Thumbs.db
 *.sublime-workspace
 *.sublime-project
 
-# Docker
-.dockerignore
-
 # Logs
 *.log

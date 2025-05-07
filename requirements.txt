@@ -3,3 +3,4 @@ google-cloud-speech==2.32.0
 pydub==0.25.1
 python-dotenv==1.1.0
 requests==2.32.3
+audioop-lts==0.2.1

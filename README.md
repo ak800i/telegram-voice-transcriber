@@ -1,6 +1,7 @@
 # Telegram Voice Message Transcriber Bot
 
 A Telegram bot that transcribes voice messages to text, specifically optimized for Serbian language.
+Tested working with WhatsApp voices on Android (via 3-dot menu > Share).
 
 ## Features
 

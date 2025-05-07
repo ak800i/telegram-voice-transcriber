@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .
+RUN chmod +x /app/entrypoint.sh
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -25,5 +26,5 @@ RUN echo '#!/bin/bash\necho "Container environment:"\nls -la .\necho "Environmen
     && chmod +x /entrypoint.sh
 
 # Use the entrypoint script
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "main.py"]

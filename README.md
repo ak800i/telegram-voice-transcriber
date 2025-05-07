@@ -66,7 +66,7 @@ docker run -d --name voice-transcriber --restart unless-stopped \
 
 If you want to run the bot locally for development:
 
-1. Install Python 3.9+ and the required packages:
+1. Install Python 3.13+ and the required packages:
    ```bash
    pip install -r requirements.txt
    ```

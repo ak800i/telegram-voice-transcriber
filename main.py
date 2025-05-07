@@ -5,7 +5,7 @@ import tempfile
 import sqlite3
 from dotenv import load_dotenv
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from google.cloud import speech
 from pydub import AudioSegment
 
@@ -243,24 +243,24 @@ except Exception as e:
     logger.error(f"Error initializing Google Cloud Speech client: {e}")
     raise
 
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
-    update.message.reply_text(
+    await update.message.reply_text(
         'Hi! I am a voice message transcription bot. '
         'Forward me voice messages, and I will transcribe them to text. '
         'I specialize in Serbian language transcription.'
     )
 
-def help_command(update: Update, context: CallbackContext) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /help is issued."""
-    update.message.reply_text(
+    await update.message.reply_text(
         'Forward me a voice message and I will transcribe it to text. '
         'Currently optimized for Serbian language.\n\n'
         'Use /stats to see your usage statistics.\n'
         'Use /globalstats to see global usage statistics.'
     )
 
-def stats_command(update: Update, context: CallbackContext) -> None:
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send user's audio processing statistics."""
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
@@ -279,9 +279,9 @@ def stats_command(update: Update, context: CallbackContext) -> None:
     if global_limit_reached:
         message += "\n⚠️ Global limit reached. No more transcriptions available."
     
-    update.message.reply_text(message, parse_mode='Markdown')
+    await update.message.reply_text(message, parse_mode='Markdown')
 
-def global_stats_command(update: Update, context: CallbackContext) -> None:
+async def global_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send global audio processing statistics."""
     stats = get_global_stats()
     
@@ -299,7 +299,7 @@ def global_stats_command(update: Update, context: CallbackContext) -> None:
         for i, (username, minutes) in enumerate(stats['top_users'], 1):
             message += f"{i}. {username or 'Unknown'}: {minutes:.2f} minutes\n"
     
-    update.message.reply_text(message, parse_mode='Markdown')
+    await update.message.reply_text(message, parse_mode='Markdown')
 
 def transcribe_audio(file_path):
     """Transcribe the given audio file using Google Speech-to-Text API."""
@@ -348,7 +348,7 @@ def transcribe_audio(file_path):
         logger.error(f"Error during transcription: {e}")
         return 0, f"Transcription error: {str(e)}"
 
-def handle_voice(update: Update, context: CallbackContext) -> None:
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle voice messages and transcribe them."""
     user_id = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
@@ -356,25 +356,25 @@ def handle_voice(update: Update, context: CallbackContext) -> None:
     # Check if global limit has been exceeded
     limit_reached, current_usage = check_global_audio_limit()
     if limit_reached:
-        update.message.reply_text(
+        await update.message.reply_text(
             f"⚠️ Sorry, the global audio processing limit has been reached "
             f"({MAX_AUDIO_MINUTES} minutes). No more transcriptions are available."
         )
         return
     
     # Reply to let the user know we're processing the voice message
-    message = update.message.reply_text("Processing your voice message...")
+    message = await update.message.reply_text("Processing your voice message...")
     
     try:
         # Get the voice message file
-        voice_file = context.bot.get_file(update.message.voice.file_id)
+        voice_file = await context.bot.get_file(update.message.voice.file_id)
         
         # Download the file to a temporary location
         temp_file = tempfile.NamedTemporaryFile(delete=False).name
-        voice_file.download(temp_file)
+        await voice_file.download_to_drive(temp_file)
         
-        # Transcribe the voice message and get audio length
-        audio_length_sec, transcript = transcribe_audio(temp_file)
+        # Transcribe the voice message and get audio length in an executor
+        audio_length_sec, transcript = await asyncio.to_thread(transcribe_audio, temp_file)
         
         # Track the audio processing
         track_audio_processing(user_id, username, audio_length_sec)
@@ -387,36 +387,48 @@ def handle_voice(update: Update, context: CallbackContext) -> None:
         
         # Reply with the transcript
         if transcript:
-            message.edit_text(f"Transcript: {transcript}{limit_message}")
+            await message.edit_text(f"Transcript: {transcript}{limit_message}")
         else:
-            message.edit_text(f"Sorry, I couldn't transcribe that voice message.{limit_message}")
+            await message.edit_text(f"Sorry, I couldn't transcribe that voice message.{limit_message}")
     except Exception as e:
         logger.error(f"Error handling voice message: {e}")
-        message.edit_text(f"Error: {str(e)}")
+        await message.edit_text(f"Error: {str(e)}")
 
-def main():
+async def main() -> None:
     """Start the bot."""
-    # Create the Updater and pass it your bot's token
-    updater = Updater(TELEGRAM_TOKEN)
-    
-    # Get the dispatcher to register handlers
-    dispatcher = updater.dispatcher
+    # Create the Application and pass it your bot's token
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
     
     # Add command handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(CommandHandler("stats", stats_command))
-    dispatcher.add_handler(CommandHandler("globalstats", global_stats_command))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("globalstats", global_stats_command))
     
     # Add message handler for voice messages
-    dispatcher.add_handler(MessageHandler(Filters.voice, handle_voice))
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     
     # Start the Bot
-    updater.start_polling()
-    logger.info("Bot started")
-    
-    # Run the bot until you press Ctrl-C
-    updater.idle()
+    logger.info("Starting bot with polling")
+    await application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
-    main()
+    # Extremely simplified approach for Docker environments
+    from telegram.ext import ApplicationBuilder
+    
+    logger.info("Starting bot using non-asyncio entry point")
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # Add command handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("globalstats", global_stats_command))
+    
+    # Add message handler for voice messages
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    
+    # Use the blocking version which handles its own event loop
+    logger.info("Running bot with run_polling()")
+    app.run_polling(drop_pending_updates=True)
+    logger.info("Bot stopped")

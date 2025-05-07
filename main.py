@@ -297,50 +297,52 @@ async def global_stats_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def transcribe_audio(file_path):
     """Transcribe the given audio file using Google Speech-to-Text API."""
+    temp_wav = None
     try:
         # Convert the audio file to the correct format (WAV, mono, 16kHz, 16-bit)
         temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
         logger.info(f"Converting audio file to proper format: {file_path} -> {temp_wav}")
         
-        audio = AudioSegment.from_file(file_path)
-        audio = audio.set_channels(1)  # Convert to mono
-        audio = audio.set_frame_rate(16000)  # Convert to 16kHz
-        audio = audio.set_sample_width(2)  # Convert to 16-bit (2 bytes per sample)
+        # Process audio in one go with chained operations
+        audio = (AudioSegment.from_file(file_path)
+                .set_channels(1)         # Convert to mono
+                .set_frame_rate(16000)   # Convert to 16kHz
+                .set_sample_width(2))    # Convert to 16-bit (2 bytes per sample)
         
-        logger.info(f"Audio properties after conversion: channels={audio.channels}, frame_rate={audio.frame_rate}, sample_width={audio.sample_width}")
         audio.export(temp_wav, format="wav")
+        audio_length_sec = len(audio) / 1000  # Length in seconds
         
-        # Read the audio file
+        # Configure and perform speech recognition
         with open(temp_wav, "rb") as audio_file:
-            content = audio_file.read()
+            response = speech_client.recognize(
+                config=speech.RecognitionConfig(
+                    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                    sample_rate_hertz=16000,
+                    language_code="sr-RS",  # Serbian language code
+                    model="default",
+                    enable_automatic_punctuation=True,
+                ),
+                audio=speech.RecognitionAudio(content=audio_file.read())
+            )
         
-        # Configure the audio to be recognized
-        audio_for_speech = speech.RecognitionAudio(content=content)
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000,
-            language_code="sr-RS",  # Serbian language code
-            model="default",
-            enable_automatic_punctuation=True,
-        )
+        # Join all transcribed parts
+        transcript = "".join(result.alternatives[0].transcript for result in response.results)
         
-        # Detect speech in the audio file
-        logger.info("Sending audio to Google Speech-to-Text API")
-        response = speech_client.recognize(config=config, audio=audio_for_speech)
-        
-        transcript = ""
-        for result in response.results:
-            transcript += result.alternatives[0].transcript
-        
-        # Clean up temporary files
-        os.unlink(temp_wav)
-        os.unlink(file_path)
-        
-        # Return audio length in seconds and the transcript
-        return len(audio) / 1000, transcript  # Length in seconds
+        return audio_length_sec, transcript
+    
     except Exception as e:
         logger.error(f"Error during transcription: {e}")
         return 0, f"Transcription error: {str(e)}"
+    
+    finally:
+        # Clean up temporary files
+        try:
+            if temp_wav and os.path.exists(temp_wav):
+                os.unlink(temp_wav)
+            if file_path and os.path.exists(file_path):
+                os.unlink(file_path)
+        except Exception as e:
+            logger.error(f"Error cleaning up temporary files: {e}")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle voice messages and transcribe them."""

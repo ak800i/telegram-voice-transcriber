@@ -7,7 +7,9 @@ import asyncio
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from faster_whisper import WhisperModel
+from pydub import AudioSegment
+import openai
+import time
 
 # Load environment variables from .env file first
 load_dotenv()
@@ -28,6 +30,19 @@ logger.info(f"Logging level set to: {LOG_LEVEL}")
 # Get environment variables
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 logger.info(f"Loaded TELEGRAM_TOKEN: {TELEGRAM_TOKEN[:4]}...{TELEGRAM_TOKEN[-4:] if TELEGRAM_TOKEN else 'None'}")
+
+# Azure OpenAI Configuration
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT')
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_REGION = os.getenv('AZURE_REGION')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2024-06-01')  # Updated to match deployed model API version
+
+# Configure OpenAI client for Azure
+client = openai.AzureOpenAI(
+    azure_endpoint=AZURE_ENDPOINT,
+    api_key=AZURE_API_KEY,
+    api_version=AZURE_API_VERSION
+)
 
 # Constants
 MAX_AUDIO_MINUTES = 50  # Maximum allowed audio processing time in minutes (global limit)
@@ -232,47 +247,56 @@ if not TELEGRAM_TOKEN:
 # Initialize the database
 init_db()
 
-# Initialize Whisper model
+# Initialize OpenAI client for Azure
 try:
-    logger.info("Loading Whisper medium model for Serbian")
-    # Changed from tiny to medium model for better accuracy with Serbian language
-    whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
-    logger.info("Whisper medium model loaded successfully")
+    logger.info("Configuring OpenAI client for Azure")
+    openai.api_type = "azure"
+    openai.api_version = AZURE_API_VERSION
+    openai.api_base = AZURE_ENDPOINT
+    openai.api_key = AZURE_API_KEY
+    logger.info("OpenAI client configured successfully")
 except Exception as e:
-    logger.error(f"Error loading Whisper model: {e}")
+    logger.error(f"Error configuring OpenAI client: {e}")
     raise
 
 def transcribe_audio(file_path):
-    """Transcribe the given audio file using faster-whisper."""
+    """Transcribe the given audio file using Azure OpenAI."""
     try:
         # Load and transcribe the audio file
         logger.info(f"Transcribing audio file: {file_path}")
         
-        # Optimized parameters for Serbian transcription
-        segments, info = whisper_model.transcribe(
-            file_path, 
-            language="sr", 
-            beam_size=5,
-            word_timestamps=True,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500)
-        )
+        # Load audio file with pydub
+        audio = AudioSegment.from_file(file_path)
         
-        # Convert the generator to a list and then process segments
-        segments_list = list(segments)
+        # Export audio to a temporary wav file with correct sample rate
+        temp_wav_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        audio.export(temp_wav_file.name, format="wav", parameters=["-ar", "16000"])
         
-        # Collect all segments into a single transcript
-        transcript = ""
-        max_end_time = 0
+        # Prepare the transcription request
+        with open(temp_wav_file.name, "rb") as audio_file:
+            try:
+                # Call Azure OpenAI Whisper API
+                response = client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-1",
+                    response_format="text",
+                    language="sr"
+                )
+                
+                # The response is already a string with the text content
+                transcript = response
+                
+            except Exception as api_error:
+                logger.error(f"API error during transcription: {api_error}")
+                return 0, f"API error: {str(api_error)}"
+            
+        # Clean up temporary file
+        if os.path.exists(temp_wav_file.name):
+            os.remove(temp_wav_file.name)
+            
+        audio_length_sec = len(audio) / 1000  # Convert ms to seconds
         
-        for segment in segments_list:
-            transcript += segment.text + " "
-            if segment.end > max_end_time:
-                max_end_time = segment.end
-        
-        audio_length_sec = max_end_time
-        
-        return audio_length_sec, transcript.strip()
+        return audio_length_sec, transcript
     
     except Exception as e:
         logger.error(f"Error during transcription: {e}")

@@ -3,6 +3,5 @@ pydub==0.25.1
 python-dotenv==1.1.0
 requests==2.32.3
 audioop-lts==0.2.1
-faster-whisper==1.1.1
 ffmpeg-python
-av
+openai>=1.12.0

@@ -395,26 +395,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error(f"Error handling voice message: {e}")
         await message.edit_text(f"Error: {str(e)}")
 
-async def main() -> None:
+def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-    
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("globalstats", global_stats_command))
-    
-    # Add message handler for voice messages
-    application.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    
-    # Start the Bot
-    logger.info("Starting bot with polling")
-    await application.run_polling(drop_pending_updates=True)
-
-if __name__ == '__main__':
-    # Extremely simplified approach for Docker environments
     logger.info("Starting bot using non-asyncio entry point")
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
@@ -431,3 +414,6 @@ if __name__ == '__main__':
     logger.info("Running bot with run_polling()")
     app.run_polling(drop_pending_updates=True)
     logger.info("Bot stopped")
+
+if __name__ == '__main__':
+    main()

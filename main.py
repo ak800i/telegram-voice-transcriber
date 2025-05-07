@@ -7,8 +7,7 @@ import asyncio
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from google.cloud import speech
-from pydub import AudioSegment
+from faster_whisper import WhisperModel
 
 # Load environment variables from .env file first
 load_dotenv()
@@ -233,15 +232,52 @@ if not TELEGRAM_TOKEN:
 # Initialize the database
 init_db()
 
-# Initialize Google Cloud Speech client
+# Initialize Whisper model
 try:
-    logger.info("Initializing Google Cloud Speech client")
-    speech_client = speech.SpeechClient()
-    logger.info("Google Cloud Speech client initialized successfully")
+    logger.info("Loading Whisper medium model for Serbian")
+    # Changed from tiny to medium model for better accuracy with Serbian language
+    whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
+    logger.info("Whisper medium model loaded successfully")
 except Exception as e:
-    logger.error(f"Error initializing Google Cloud Speech client: {e}")
+    logger.error(f"Error loading Whisper model: {e}")
     raise
 
+def transcribe_audio(file_path):
+    """Transcribe the given audio file using faster-whisper."""
+    try:
+        # Load and transcribe the audio file
+        logger.info(f"Transcribing audio file: {file_path}")
+        
+        # Optimized parameters for Serbian transcription
+        segments, info = whisper_model.transcribe(
+            file_path, 
+            language="sr", 
+            beam_size=5,
+            word_timestamps=True,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500)
+        )
+        
+        # Convert the generator to a list and then process segments
+        segments_list = list(segments)
+        
+        # Collect all segments into a single transcript
+        transcript = ""
+        max_end_time = 0
+        
+        for segment in segments_list:
+            transcript += segment.text + " "
+            if segment.end > max_end_time:
+                max_end_time = segment.end
+        
+        audio_length_sec = max_end_time
+        
+        return audio_length_sec, transcript.strip()
+    
+    except Exception as e:
+        logger.error(f"Error during transcription: {e}")
+        return 0, f"Transcription error: {str(e)}"
+    
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     await update.message.reply_text(
@@ -299,55 +335,6 @@ async def global_stats_command(update: Update, context: ContextTypes.DEFAULT_TYP
             message += f"{i}. {username or 'Unknown'}: {minutes:.2f} minutes\n"
     
     await update.message.reply_text(message, parse_mode='Markdown')
-
-def transcribe_audio(file_path):
-    """Transcribe the given audio file using Google Speech-to-Text API."""
-    temp_wav = None
-    try:
-        # Convert the audio file to the correct format (WAV, mono, 16kHz, 16-bit)
-        temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
-        logger.info(f"Converting audio file to proper format: {file_path} -> {temp_wav}")
-        
-        # Process audio in one go with chained operations
-        audio = (AudioSegment.from_file(file_path)
-                .set_channels(1)         # Convert to mono
-                .set_frame_rate(16000)   # Convert to 16kHz
-                .set_sample_width(2))    # Convert to 16-bit (2 bytes per sample)
-        
-        audio.export(temp_wav, format="wav")
-        audio_length_sec = len(audio) / 1000  # Length in seconds
-        
-        # Configure and perform speech recognition
-        with open(temp_wav, "rb") as audio_file:
-            response = speech_client.recognize(
-                config=speech.RecognitionConfig(
-                    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                    sample_rate_hertz=16000,
-                    language_code="sr-RS",  # Serbian language code
-                    model="default",
-                    enable_automatic_punctuation=True,
-                ),
-                audio=speech.RecognitionAudio(content=audio_file.read())
-            )
-        
-        # Join all transcribed parts
-        transcript = "".join(result.alternatives[0].transcript for result in response.results)
-        
-        return audio_length_sec, transcript
-    
-    except Exception as e:
-        logger.error(f"Error during transcription: {e}")
-        return 0, f"Transcription error: {str(e)}"
-    
-    finally:
-        # Clean up temporary files
-        try:
-            if temp_wav and os.path.exists(temp_wav):
-                os.unlink(temp_wav)
-            if file_path and os.path.exists(file_path):
-                os.unlink(file_path)
-        except Exception as e:
-            logger.error(f"Error cleaning up temporary files: {e}")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle voice messages and transcribe them."""

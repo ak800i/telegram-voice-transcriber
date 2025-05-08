@@ -7,8 +7,9 @@ import asyncio
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from google.cloud import speech
 from pydub import AudioSegment
+import openai
+import time
 
 # Load environment variables from .env file first
 load_dotenv()
@@ -29,6 +30,19 @@ logger.info(f"Logging level set to: {LOG_LEVEL}")
 # Get environment variables
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 logger.info(f"Loaded TELEGRAM_TOKEN: {TELEGRAM_TOKEN[:4]}...{TELEGRAM_TOKEN[-4:] if TELEGRAM_TOKEN else 'None'}")
+
+# Azure OpenAI Configuration
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT')
+AZURE_API_KEY = os.getenv('AZURE_API_KEY')
+AZURE_REGION = os.getenv('AZURE_REGION')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION', '2024-06-01')  # Updated to match deployed model API version
+
+# Configure OpenAI client for Azure
+client = openai.AzureOpenAI(
+    azure_endpoint=AZURE_ENDPOINT,
+    api_key=AZURE_API_KEY,
+    api_version=AZURE_API_VERSION
+)
 
 # Constants
 MAX_AUDIO_MINUTES = 50  # Maximum allowed audio processing time in minutes (global limit)
@@ -233,15 +247,61 @@ if not TELEGRAM_TOKEN:
 # Initialize the database
 init_db()
 
-# Initialize Google Cloud Speech client
+# Initialize OpenAI client for Azure
 try:
-    logger.info("Initializing Google Cloud Speech client")
-    speech_client = speech.SpeechClient()
-    logger.info("Google Cloud Speech client initialized successfully")
+    logger.info("Configuring OpenAI client for Azure")
+    openai.api_type = "azure"
+    openai.api_version = AZURE_API_VERSION
+    openai.api_base = AZURE_ENDPOINT
+    openai.api_key = AZURE_API_KEY
+    logger.info("OpenAI client configured successfully")
 except Exception as e:
-    logger.error(f"Error initializing Google Cloud Speech client: {e}")
+    logger.error(f"Error configuring OpenAI client: {e}")
     raise
 
+def transcribe_audio(file_path):
+    """Transcribe the given audio file using Azure OpenAI."""
+    try:
+        # Load and transcribe the audio file
+        logger.info(f"Transcribing audio file: {file_path}")
+        
+        # Load audio file with pydub
+        audio = AudioSegment.from_file(file_path)
+        
+        # Export audio to a temporary wav file with correct sample rate
+        temp_wav_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        audio.export(temp_wav_file.name, format="wav", parameters=["-ar", "16000"])
+        
+        # Prepare the transcription request
+        with open(temp_wav_file.name, "rb") as audio_file:
+            try:
+                # Call Azure OpenAI Whisper API
+                response = client.audio.transcriptions.create(
+                    file=audio_file,
+                    model="whisper-1",
+                    response_format="text",
+                    language="sr"
+                )
+                
+                # The response is already a string with the text content
+                transcript = response
+                
+            except Exception as api_error:
+                logger.error(f"API error during transcription: {api_error}")
+                return 0, f"API error: {str(api_error)}"
+            
+        # Clean up temporary file
+        if os.path.exists(temp_wav_file.name):
+            os.remove(temp_wav_file.name)
+            
+        audio_length_sec = len(audio) / 1000  # Convert ms to seconds
+        
+        return audio_length_sec, transcript
+    
+    except Exception as e:
+        logger.error(f"Error during transcription: {e}")
+        return 0, f"Transcription error: {str(e)}"
+    
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     await update.message.reply_text(
@@ -299,55 +359,6 @@ async def global_stats_command(update: Update, context: ContextTypes.DEFAULT_TYP
             message += f"{i}. {username or 'Unknown'}: {minutes:.2f} minutes\n"
     
     await update.message.reply_text(message, parse_mode='Markdown')
-
-def transcribe_audio(file_path):
-    """Transcribe the given audio file using Google Speech-to-Text API."""
-    temp_wav = None
-    try:
-        # Convert the audio file to the correct format (WAV, mono, 16kHz, 16-bit)
-        temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
-        logger.info(f"Converting audio file to proper format: {file_path} -> {temp_wav}")
-        
-        # Process audio in one go with chained operations
-        audio = (AudioSegment.from_file(file_path)
-                .set_channels(1)         # Convert to mono
-                .set_frame_rate(16000)   # Convert to 16kHz
-                .set_sample_width(2))    # Convert to 16-bit (2 bytes per sample)
-        
-        audio.export(temp_wav, format="wav")
-        audio_length_sec = len(audio) / 1000  # Length in seconds
-        
-        # Configure and perform speech recognition
-        with open(temp_wav, "rb") as audio_file:
-            response = speech_client.recognize(
-                config=speech.RecognitionConfig(
-                    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                    sample_rate_hertz=16000,
-                    language_code="sr-RS",  # Serbian language code
-                    model="default",
-                    enable_automatic_punctuation=True,
-                ),
-                audio=speech.RecognitionAudio(content=audio_file.read())
-            )
-        
-        # Join all transcribed parts
-        transcript = "".join(result.alternatives[0].transcript for result in response.results)
-        
-        return audio_length_sec, transcript
-    
-    except Exception as e:
-        logger.error(f"Error during transcription: {e}")
-        return 0, f"Transcription error: {str(e)}"
-    
-    finally:
-        # Clean up temporary files
-        try:
-            if temp_wav and os.path.exists(temp_wav):
-                os.unlink(temp_wav)
-            if file_path and os.path.exists(file_path):
-                os.unlink(file_path)
-        except Exception as e:
-            logger.error(f"Error cleaning up temporary files: {e}")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle voice messages and transcribe them."""

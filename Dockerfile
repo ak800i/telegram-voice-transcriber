@@ -1,9 +1,7 @@
-FROM python:3.13
+FROM python:3.13-alpine
 
 # Install required system dependencies for ffmpeg and audio processing
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ffmpeg
 
 WORKDIR /app
 
@@ -12,8 +10,6 @@ RUN mkdir -p /app/data && chmod 777 /app/data
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application

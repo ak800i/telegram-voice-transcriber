@@ -9,6 +9,7 @@ Tested working with WhatsApp voices on Android (via 3-dot menu > Share).
 - Supports Serbian language
 - Runs in a Docker container for easy deployment
 - Uses Google Cloud Speech-to-Text API for high-quality transcription
+- If you want to use Azure's Whisper API, or a local Whiser model, you can find a working implementation in the commit history.
 
 ## Prerequisites
 

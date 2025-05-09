@@ -33,7 +33,7 @@ Tested working with WhatsApp voices on Android (via 3-dot menu > Share).
 
 ### 3. Configure Environment Variables
 
-1. Create a `.env` file based on the provided [.env.example](/.env.example):
+1. Create a `.env` file based on the provided [.env.example](/.env.example)
 
 ### 4. Build and Run with Docker
 

@@ -33,28 +33,11 @@ Tested working with WhatsApp voices on Android (via 3-dot menu > Share).
 
 ### 3. Configure Environment Variables
 
-1. Create a `.env` file based on the provided `.env.example`:
-
-```bash
-# Telegram Bot Token (Get from @BotFather)
-TELEGRAM_TOKEN=your_telegram_bot_token_here
-
-# Google Cloud credentials 
-GOOGLE_APPLICATION_CREDENTIALS=path/to/your-google-credentials.json
-```
+1. Create a `.env` file based on the provided [.env.example](/.env.example):
 
 ### 4. Build and Run with Docker
 
-```bash
-# Build the Docker image
-docker build -t telegram-voice-transcriber .
-
-# Run the Docker container
-docker run -d --name voice-transcriber --restart unless-stopped \
-  -v $(pwd)/.env:/app/.env \
-  -v $(pwd)/your-google-credentials.json:/app/your-google-credentials.json \
-  telegram-voice-transcriber
-```
+To build and run use [start.bat](/start.bat)
 
 ## Usage
 
